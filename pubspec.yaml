@@ -1,0 +1,4 @@
+name: perf_api
+version: 0.0.1
+author: pavelgj@gmail.com
+description: A simple profiling instrumentation API
