@@ -1,4 +1,5 @@
 name: perf_api
 version: 0.0.1
-author: pavelgj@gmail.com
+author: Pavel Jbanov <pavelgj@gmail.com>
+homepage: https://github.com/pavelgj/perf_api.dart
 description: A simple profiling instrumentation API

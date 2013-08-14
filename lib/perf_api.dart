@@ -1,4 +1,4 @@
-library perf;
+library perf_api;
 
 /**
  * A simple profiler api.
