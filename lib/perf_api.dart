@@ -1,44 +1,70 @@
 library perf_api;
 
+import 'dart:async';
+
 /**
  * A simple profiler api.
  */
 abstract class Profiler {
 
   /**
-   * Times execution of the [body]. Body can either be a no argument function,
-   * or a Future. If function, it is executed synchronously and its return value
-   * is returned. If it's a Future, then timing is stopped when the future
-   * completes either successfully or with error. The "then" of the future with
-   * same result values is returned. See [startTimer] for more information
-   * about [extraData].
+   * Starts a new timer for a given action [name]. An [int] timer id will be
+   * returned which can be used in [stopTimer] to stop the timer.
+   *
+   * [extraData] is additional information about the timed action. Implementing
+   * profiler should not assume any semantic or syntactic structure of that
+   * data and is free to ignore it in aggregate reports.
    */
-  dynamic time(String id, body, [String extraData]);
+  int startTimer(String name, [String extraData]);
 
   /**
-   * Starts a timer for a given action [id]. If the timer is already started,
-   * this method will throw a [TimerError]. [extraData] is additional
-   * infromation about the timed action. Implementing profiler is free to
-   * ignore it.
+   * Stop a timer for a given [idOrName]. If [idOrName] is [int] then it's
+   * treated as an action identifier returned from [startTimer]. If id is
+   * invalid or timer for that id was already stopped then [ProfilerError]
+   * will be thrown. If [idOrName] is [String] then the latest active timer
+   * with that name will be stopped. If no active timer exists then
+   * [ProfilerError] will be thrown.
    */
-  void startTimer(String id, [String extraData]);
-
-  /**
-   * Stop a timer for a given [descr]. A timer must already be started,
-   * otherwise it will throw a [TimerError].
-   */
-  void stopTimer(String id);
+  void stopTimer(dynamic idOrName);
 
   /**
    * A simple zero-duration marker.
    */
-  void markTime(String id);
+  void markTime(String name, [String extraData]);
+
+  /**
+   * Times execution of the [functionOrFuture]. Body can either be a no argument
+   * function or a [Future]. If function, it is executed synchronously and its
+   * return value is returned. If it's a Future, then timing is stopped when the
+   * future completes either successfully or with error.
+   */
+  dynamic time(String name, functionOrFuture, [String extraData]) {
+    var id = startTimer(name, extraData);
+    if (functionOrFuture is Function) {
+      try {
+        return functionOrFuture();
+      } finally {
+        stopTimer(id);
+      }
+    }
+    if (functionOrFuture is Future) {
+      return functionOrFuture.then(
+          (v) {
+            stopTimer(id);
+            return v;
+          },
+          onError: (e) {
+            stopTimer(id);
+            throw e;
+          });
+    }
+    throw new ProfilerError(
+        'Invalid functionOrFuture or type ${functionOrFuture.runtimeType}');
+  }
 }
 
-class TimerError extends Error {
-  String message;
-
-  TimerError(String message);
-
+class ProfilerError extends Error {
+  final String message;
+  ProfilerError(String this.message);
   toString() => message;
 }
