@@ -5,7 +5,7 @@ import 'dart:async';
 /**
  * A simple profiler api.
  */
-abstract class Profiler {
+class Profiler {
 
   /**
    * Starts a new timer for a given action [name]. An [int] timer id will be
@@ -15,7 +15,7 @@ abstract class Profiler {
    * profiler should not assume any semantic or syntactic structure of that
    * data and is free to ignore it in aggregate reports.
    */
-  int startTimer(String name, [String extraData]);
+  int startTimer(String name, [String extraData]) => null;
 
   /**
    * Stop a timer for a given [idOrName]. If [idOrName] is [int] then it's
@@ -25,12 +25,12 @@ abstract class Profiler {
    * with that name will be stopped. If no active timer exists then
    * [ProfilerError] will be thrown.
    */
-  void stopTimer(dynamic idOrName);
+  void stopTimer(dynamic idOrName) {}
 
   /**
    * A simple zero-duration marker.
    */
-  void markTime(String name, [String extraData]);
+  void markTime(String name, [String extraData]) {}
 
   /**
    * Times execution of the [functionOrFuture]. Body can either be a no argument
