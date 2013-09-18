@@ -6,6 +6,12 @@ import 'dart:async';
  * A simple profiler api.
  */
 class Profiler {
+  
+  /**
+   * Const constructor allows instances of this class to be used as a no-op
+   * implementation.
+   */
+  const Profiler();
 
   /**
    * Starts a new timer for a given action [name]. An [int] timer id will be
