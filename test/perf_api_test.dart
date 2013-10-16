@@ -50,43 +50,43 @@ main() {
     group('counters', () {
 
       test('should return null for uninitialized counter', () {
-        expect(perf.getCounter('foo'), null);
+        expect(perf.counters['foo'], null);
       });
 
       test('should increment counter', () {
-        perf.increment('foo');
-        expect(perf.getCounter('foo'), 1);
+        perf.counters.increment('foo');
+        expect(perf.counters['foo'], 1);
       });
 
       test('should increment counter by given delta', () {
-        perf.increment('foo', 10);
-        expect(perf.getCounter('foo'), 10);
-        perf.increment('foo', 5);
-        expect(perf.getCounter('foo'), 15);
+        perf.counters.increment('foo', 10);
+        expect(perf.counters['foo'], 10);
+        perf.counters.increment('foo', 5);
+        expect(perf.counters['foo'], 15);
       });
 
       test('should set counter to provided value', () {
-        perf.setCounter('foo', 10);
-        expect(perf.getCounter('foo'), 10);
+        perf.counters['foo'] = 10;
+        expect(perf.counters['foo'], 10);
       });
 
       test('should decrement counter when delta is negative', () {
-        perf.setCounter('foo', 15);
-        perf.increment('foo', -10);
-        expect(perf.getCounter('foo'), 5);
+        perf.counters['foo'] = 15;
+        perf.counters.increment('foo', -10);
+        expect(perf.counters['foo'], 5);
       });
 
       test('should allow negative counter values', () {
-        perf.setCounter('foo', 10);
-        perf.increment('foo', -15);
-        expect(perf.getCounter('foo'), -5);
+        perf.counters['foo'] = 10;
+        perf.counters.increment('foo', -15);
+        expect(perf.counters['foo'], -5);
       });
 
       test('should return counters map', () {
-        perf.setCounter('foo', 1);
-        perf.increment('bar', 2);
-        perf.setCounter('baz', 3);
-        expect(perf.counters, {
+        perf.counters['foo'] = 1;
+        perf.counters.increment('bar', 2);
+        perf.counters['baz'] = 3;
+        expect(perf.counters.all, {
           'foo': 1,
           'bar': 2,
           'baz': 3
@@ -94,15 +94,15 @@ main() {
       });
 
       test('should return immutable counters map', () {
-        expect(() => perf.counters['foo'] = 0,
+        expect(() => perf.counters.all['foo'] = 0,
             throwsA(new isInstanceOf<UnsupportedError>()));
-        expect(() => perf.counters.putIfAbsent('foo', () => 0),
+        expect(() => perf.counters.all.putIfAbsent('foo', () => 0),
             throwsA(new isInstanceOf<UnsupportedError>()));
-        expect(() => perf.counters.remove('foo'),
+        expect(() => perf.counters.all.remove('foo'),
             throwsA(new isInstanceOf<UnsupportedError>()));
-        expect(() => perf.counters.clear(),
+        expect(() => perf.counters.all.clear(),
             throwsA(new isInstanceOf<UnsupportedError>()));
-        expect(() => perf.counters.addAll({}),
+        expect(() => perf.counters.all.addAll({}),
             throwsA(new isInstanceOf<UnsupportedError>()));
       });
 

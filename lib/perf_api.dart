@@ -6,8 +6,7 @@ import 'dart:async';
  * A simple profiler api.
  */
 class Profiler {
-
-  final Map<String, int> _counters = <String, int>{};
+  final Counters counters = new Counters();
 
   /**
    * Const constructor allows instances of this class to be used as a no-op
@@ -69,6 +68,13 @@ class Profiler {
     throw new ProfilerError(
         'Invalid functionOrFuture or type ${functionOrFuture.runtimeType}');
   }
+}
+
+class Counters {
+
+  final Map<String, int> _counters = <String, int>{};
+
+  const Counters();
 
   /**
    * Increments the counter under [counterName] by [delta]. Default [delta]
@@ -86,19 +92,17 @@ class Profiler {
    * Returns the current value of the counter. If the counter value is not
    * initialized then null is returned.
    */
-  int getCounter(String counterName) => _counters[counterName];
+  int operator [](String counterName) => _counters[counterName];
 
   /**
    * Sets a [value] for a [counterName]. Any previous value is overridden.
    */
-  void setCounter(String counterName, int value) {
-    _counters[counterName] = value;
-  }
+  operator []=(String counterName, int value) => _counters[counterName] = value;
 
   /**
    * Returns an immutable map of all known counter values.
    */
-  Map<String, int> get counters => new _UnmodifiableMap(_counters);
+  Map<String, int> get all => new _UnmodifiableMap(_counters);
 }
 
 int _initWithZero() => 0;
