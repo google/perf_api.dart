@@ -15,29 +15,28 @@ class Profiler {
   const Profiler();
 
   /**
-   * Starts a new timer for a given action [name]. An [int] timer id will be
+   * Starts a new timer for a given action [name]. A timer id will be
    * returned which can be used in [stopTimer] to stop the timer.
    *
    * [extraData] is additional information about the timed action. Implementing
    * profiler should not assume any semantic or syntactic structure of that
    * data and is free to ignore it in aggregate reports.
    */
-  int startTimer(String name, [String extraData]) => null;
+  dynamic startTimer(String name, [dynamic extraData]) => null;
 
   /**
-   * Stop a timer for a given [idOrName]. If [idOrName] is [int] then it's
-   * treated as an action identifier returned from [startTimer]. If id is
-   * invalid or timer for that id was already stopped then [ProfilerError]
-   * will be thrown. If [idOrName] is [String] then the latest active timer
-   * with that name will be stopped. If no active timer exists then
-   * [ProfilerError] will be thrown.
+   * Stop a timer for a given [idOrName]. [idOrName] can either be a timer
+   * identifier returned from [startTimer] or a timer name string. If [idOrName]
+   * is invalid or timer for that [idOrName] was already stopped then
+   * [ProfilerError] will be thrown. If [idOrName] is a String timer name then
+   * the latest active timer with that name will be stopped.
    */
   void stopTimer(dynamic idOrName) {}
 
   /**
    * A simple zero-duration marker.
    */
-  void markTime(String name, [String extraData]) {}
+  void markTime(String name, [dynamic extraData]) {}
 
   /**
    * Times execution of the [functionOrFuture]. Body can either be a no argument
@@ -45,7 +44,7 @@ class Profiler {
    * return value is returned. If it's a Future, then timing is stopped when the
    * future completes either successfully or with error.
    */
-  dynamic time(String name, functionOrFuture, [String extraData]) {
+  dynamic time(String name, functionOrFuture, [dynamic extraData]) {
     var id = startTimer(name, extraData);
     if (functionOrFuture is Function) {
       try {
