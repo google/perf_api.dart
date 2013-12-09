@@ -6,123 +6,221 @@ typedef int ClockFn();
 /// Default implementation of [ClockFn].
 int _dateTimeClock() => new DateTime.now().millisecondsSinceEpoch;
 
-const _TRACE_KEY = const Symbol('perf_api.trace');
-const _TRACE_MICROTASKS_KEY = const Symbol('perf_api.traceMicrotasks');
+/// Key used to indicate the current [TraceSystem] in a [Zone].
+const _TRACE_SYSTEM_KEY = const Symbol('perf_api.traceSystem');
+
+/// Get the current [TraceSystem], or [null] for none.
+TraceSystem get traceSystem => Zone.current[_TRACE_SYSTEM_KEY];
+
+/// Get the current [Trace]. This is never [null], and will return a [NoopTrace]
+/// if there is no current [TraceSystem].
+Trace get trace => traceSystem != null ? traceSystem.current :
+    const NoopTrace();
 
 /// A [TraceSystem] encapsulates state which otherwise would be static and makes
 /// it easier to test tracing.
 class TraceSystem {
 
-  /// The default [TraceSystem], used by global getters.
-  static final TraceSystem DEFAULT = new TraceSystem();
-
-  /// Monotonically increasing trace id, which must be unique within the
-  /// [TraceEvent] stream.
-  int traceId = 1;
-
-  /// The clock to use when recording timestamps.
+  /// Clock used to take timestamps.
   final ClockFn clock;
 
-  /// The root [Trace], which has id 0. Top-level events and child [Trace]s are
-  /// tagged with the root trace.
-  Trace rootTrace;
+  /// Zone specification for the traced zone.
+  var _zoneSpec;
 
-  /// [StreamController] that sinks [TraceEvent]s.
-  final traceEventSink = new StreamController<TraceEvent>.broadcast(sync: true);
+  /// Stack of currently active [Trace]s.
+  var _traceStack = <Trace>[];
 
-  /// Synchronous [Stream] of all [TraceEvent]s.
-  Stream<TraceEvent> get tracing => traceEventSink.stream;
+  /// The root [Trace], used when the [_traceStack] is empty.
+  var _rootTrace;
 
-  /// [ZoneSpecification] for child traces within this system. This zone wraps
-  /// microtasks to record their start and finish times.
-  ZoneSpecification tracingZoneSpec;
+  /// A counter that generates trace ids.
+  var _traceCounter= 1;
 
-  /// [ZoneSpecification] which deactivates tracing (until activated again).
-  ZoneSpecification noTracingZoneSpec;
+  /// The sink for [TraceEvent]s.
+  var _eventSink = new StreamController<TraceEvent>.broadcast(sync: true);
 
-  /// Tracks whether a microtask being scheduled has already been wrapped by an
-  /// inner tracing zone. Multiple tracing zones can be nested at any given
-  /// time, and this flag ensures that only the inner one records the microtask.
-  bool microtaskWrapInProgress = false;
+  /// Create a new [TraceSystem] with the given parameters.
+  TraceSystem({
+      this.clock: _dateTimeClock,
+      defaultAsync: false,
+      defaultAsyncEvents: false}) {
+    _rootTrace = new Trace._private(this, 0, defaultAsync, defaultAsyncEvents);
+    _zoneSpec = new ZoneSpecification(scheduleMicrotask: _scheduleMicrotask);
+  }
+
+  /// Get the currently active [Trace].
+  Trace get current => _traceStack.isNotEmpty ? _traceStack.last : _rootTrace;
+
+  /// Get the root [Trace].
+  Trace get root => _rootTrace;
+
+  /// Get a [Stream] of [TraceEvent]s from [Trace]s in this [TraceSystem].
+  Stream<TraceEvent> get events => _eventSink.stream;
+
+  /// Run the given function inside this a [Zone] with this [TraceSystem]. Most
+  /// clients will want to wrap main() with this function.
+  void traceInSystem(fn()) {
+    runZoned(fn, zoneSpecification: _zoneSpec, zoneValues: {
+      _TRACE_SYSTEM_KEY: this
+    });
+  }
+
+  /// Spawn a child [Trace] of the current active [Trace]. The child [Trace] is
+  /// configurable with the optional parameters, such as whether asynchronous
+  /// events are traced ([async]), reported on ([asyncEvents]) and whether an
+  /// end event for [fn] is published ([endEvent]).
+  child(fn(), {bool async: true, bool asyncEvents: true, bool endEvent: true}) {
+    var childTrace =
+        new Trace._private(this, _nextTraceId, async, asyncEvents);
+    current.record(new ChildTraceEvent().._childTraceId = childTrace.id);
+    try {
+      unsafeEnter(childTrace);
+      return fn();
+    } finally {
+      unsafeExit(childTrace);
+      current.record(new ChildTraceFunctionEndEvent()
+        .._childTraceId = childTrace.id);
+    }
+  }
+
+  /// Exclude the given [fn] from the current [Trace]. This is equivalent to
+  /// re-entering the root [Trace] before running the function.
+  void exclude(fn()) {
+    try {
+      unsafeEnter(root);
+      return fn();
+    } finally {
+      unsafeExit(root);
+    }
+  }
+
+  /// Enter a [Trace] by pushing it on the stack. This is inherently an unsafe
+  /// operation because it is the caller's responsibility to later exit the
+  /// [Trace].
+  void unsafeEnter(Trace trace) => _traceStack.add(trace);
+
+  /// Exit a [Trace] by removing it from the top of the stack. Currently this
+  /// function doesn't check if the top of the stack is the same [trace] that's
+  /// passed, but this could change.
+  void unsafeExit(Trace trace) {
+    if (_traceStack.isNotEmpty) {
+      _traceStack.removeLast();
+    }
+  }
+
+  /// Emit a [TraceEvent] on the [events] [Stream].
+  void _emit(TraceEvent event) => _eventSink.add(event);
 
   /// Generate a new trace id.
-  int newTraceId() => traceId++;
+  int get _nextTraceId => _traceCounter++;
 
-  /// Construct a new TraceSystem (probably only useful for tests).
-  TraceSystem({ClockFn this.clock: _dateTimeClock}) {
-    rootTrace = new Trace(this, 0);
-    tracingZoneSpec = new ZoneSpecification(
-        scheduleMicrotask: _traceMicrotask);
-    noTracingZoneSpec = new ZoneSpecification(
-        scheduleMicrotask: _dontTraceMicrotask);
-  }
-
-  /// Note that this will return traces from other [TraceSystem]s if they are
-  /// currently active.
-  Trace get trace {
-    var trace = Zone.current[_TRACE_KEY];
-    if (trace == null) {
-      return rootTrace;
+  /// Possibly wrap the given [microtask] to run within the current [Trace].
+  _scheduleMicrotask(self, parent, zone, microtask) {
+    var trace = current;
+    var toSchedule = microtask;
+    if (trace.async) {
+      toSchedule = () {
+        _traceStack = <Trace>[trace];
+        if (trace.asyncEvents) {
+           trace.record(new MicrotaskStartEvent());
+        }
+        try {
+          microtask();
+        } finally {
+          if (trace.asyncEvents) {
+            trace.record(new MicrotaskEndEvent());
+          }
+          _traceStack = <Trace>[];
+        }
+      };
     }
-    return trace;
-  }
-
-  bool get traceMicrotasks {
-    var current = Zone.current[_TRACE_MICROTASKS_KEY];
-    if (current == null) {
-      return false;
-    }
-    return current;
-  }
-
-  /// Possibly wrap a microtask that occurs during a trace, if this is the first
-  /// time that microtask has been seen here.
-  _traceMicrotask(self, parent, zone, microtask) {
-    if (microtaskWrapInProgress || !traceMicrotasks) {
-      // A nested zone has already wrapped this one or the user has requested
-      // that microtasks not be traced. Either way, schedule without wrapping so
-      // a parent zone can determine whether or not to wrap them.
-      parent.scheduleMicrotask(zone, microtask);
-      return;
-    }
-    microtaskWrapInProgress = true;
-    // Need to save the current trace here, because once inside the wrapped
-    // microtask, the parent zone will be current.
-    var traceCached = trace;
-    // Wrap the microtask in a function that records its start/end times.
-    var wrapped = () {
-      traceCached.record(new MicrotaskStartEvent());
-      microtask();
-      traceCached.record(new MicrotaskEndEvent());
-    };
-    // This is the call that could result in recursion to [_traceMicrotask].
-    parent.scheduleMicrotask(zone, wrapped);
-    microtaskWrapInProgress = false;
-  }
-
-/// Schedule a microtask without tracing it, either in this zone or any further.
-  _dontTraceMicrotask(self, parent, zone, microtask) {
-    // Don't want to catch any async events happening within this zone (if
-    // they're not already being caught down the zone stack).
-    var oldVal = microtaskWrapInProgress;
-    microtaskWrapInProgress = true;
-    parent.scheduleMicrotask(zone, microtask);
-    microtaskWrapInProgress = oldVal;
+    parent.scheduleMicrotask(zone, toSchedule);
   }
 }
 
-/// Get the currently active [Trace], regardless of [TraceSystem]. This will
-/// return the default [TraceSystem] root [Trace] if there is no active [Trace].
-Trace get trace => TraceSystem.DEFAULT.trace;
+/// Unit of accounting for [TraceEvent]s. Only one [Trace] is active at any
+/// given time.
+class Trace {
+  final TraceSystem system;
+  final int id;
 
-/// [Stream] of [TraceEvent]s from the default [TraceSystem].
-Stream<TraceEvent> get tracing => TraceSystem.DEFAULT.tracing;
+  final bool async;
+  final bool asyncEvents;
+
+  Trace._private(this.system, this.id, this.async, this.asyncEvents);
+
+  /// Record a [TraceEvent] within this [Trace]. Optionally, take a [StackTrace]
+  /// at the moment of recording.
+  void record(TraceEvent event, {bool stackTrace: false}) {
+    event._traceId = id;
+    event._ts = system.clock();
+    if (stackTrace) {
+      event._stackTrace = _captureStackTrace();
+    }
+    system._emit(event);
+  }
+
+  /// Spawn a child [Trace] of the current active [Trace]. The child [Trace] is
+  /// configurable with the optional parameters, such as whether asynchronous
+  /// events are traced ([async]), reported on ([asyncEvents]) and whether an
+  /// end event for [fn] is published ([endEvent]).
+  child(fn(), {bool async: true, bool asyncEvents: true, bool endEvent: true})
+      => system.child(
+          fn, async: async, asyncEvents: asyncEvents, endEvent: endEvent);
+
+  /// Exclude the given [fn] from the current [Trace]. This is equivalent to
+  /// re-entering the root [Trace] before running the function.
+  exclude(fn()) => system.exclude(fn);
+
+  /// Enter a [Trace] by pushing it on the stack. This is inherently an unsafe
+  /// operation because it is the caller's responsibility to later exit the
+  /// [Trace].
+  void unsafeEnter(Trace trace) => system.unsafeEnter(trace);
+
+  /// Exit a [Trace] by removing it from the top of the stack. Currently this
+  /// function doesn't check if the top of the stack is the same [trace] that's
+  /// passed, but this could change.
+  void unsafeExit(Trace trace) => system.unsafeExit(trace);
+
+  String toString() => "{trace: $id, async: $async, asyncEvents: $asyncEvents}";
+
+  /// Take a [StackTrace] and return it.
+  static StackTrace _captureStackTrace() {
+    try {
+      throw 'trace';
+    } catch (e, trace) {
+      return trace;
+    }
+  }
+}
+
+/// A [Trace] that does nothing. Returned by [trace] when there is no active
+/// [TraceSystem].
+class NoopTrace implements Trace {
+  TraceSystem get system => null;
+  int get id => 0;
+  bool get async => false;
+  bool get asyncEvents => false;
+
+  const NoopTrace();
+
+  void record(event, {stackTrace}) {}
+
+  void unsafeEnter(trace) {}
+
+  void unsafeExit(trace) {}
+
+  child(fn(), {async, asyncEvents, endEvent}) => fn();
+
+  void exclude(fn()) => fn();
+}
 
 /// An event that occurs during a trace. [TraceEvent]s can represent child
 /// [Trace]s, beginning or ending asynchronous operations, and user events.
 abstract class TraceEvent {
-   int _traceId;
-   int _ts;
+  int _traceId;
+  int _ts;
+  StackTrace _stackTrace;
 
   TraceEvent();
 
@@ -131,6 +229,9 @@ abstract class TraceEvent {
 
   /// Timestamp at which this event was recorded via [Trace.record].
   int get ts => _ts;
+
+  /// Get the [StackTrace] associated with this [TraceEvent], if any.
+  StackTrace get stackTrace => _stackTrace;
 }
 
 /// Indicates a child trace has been started within an outer trace.
@@ -165,56 +266,4 @@ class MicrotaskStartEvent extends TraceEvent {
 /// been scheduled as a result.
 class MicrotaskEndEvent extends TraceEvent {
   String toString() => 'tracing.microtask.end($traceId)';
-}
-
-/// An active [Trace] is a destination for [TraceEvent]s (via [record]), and
-/// allows child traces to be spawned.
-class Trace {
-  final TraceSystem system;
-  final int id;
-
-  Trace(this.system, this.id);
-
-  /// Record a [TraceEvent] within this trace.
-  void record(TraceEvent event) {
-    event._traceId = id;
-    event._ts = system.clock();
-    system.traceEventSink.add(event);
-  }
-
-  /// Spawn a child [Trace] by running the given function. [start] and [end] can
-  /// optionally be specified as child classes of [ChildTraceEvent] and
-  /// [ChildTraceFunctionEndEvent], respectfully, and will be used in place of
-  /// those default events to indicate the beginning and end of the execution of
-  /// [fn] within the child [Trace]. A child [Trace] extends into microtasks
-  /// scheduled within [fn] and subsequent asynchronous operations. These
-  /// microtasks will have start/end events recorded via [MicrotaskStartEvent]
-  /// and [MicrotaskEndEvent] unless [traceMicrotasks] is false.
-  Trace child(void fn(), {
-      ChildTraceEvent start: null,
-      ChildTraceFunctionEndEvent end: null,
-      bool traceMicrotasks: true}) {
-    if (start == null) {
-      start = new ChildTraceEvent();
-    }
-    start._childTraceId = system.newTraceId();
-    record(start);
-    var childTrace = new Trace(system, start.childTraceId);
-    runZoned(fn, zoneSpecification: system.tracingZoneSpec, zoneValues: {
-        _TRACE_KEY: childTrace,
-        _TRACE_MICROTASKS_KEY: traceMicrotasks || system.traceMicrotasks});
-    if (end == null) {
-      end = new ChildTraceFunctionEndEvent();
-    }
-    end._childTraceId = start.childTraceId;
-    record(end);
-    return childTrace;
-  }
-
-  /// Stop including [TraceEvent]s and asynchronous calls made within [fn] in
-  /// the current [Trace].
-  void exclude(void fn()) =>
-      runZoned(fn, zoneSpecification: system.noTracingZoneSpec, zoneValues: {
-          _TRACE_KEY: system.rootTrace,
-          _TRACE_MICROTASKS_KEY: false});
 }
