@@ -7,10 +7,6 @@ import 'package:perf_api/perf_api.dart';
 
 main() {
 
-  test('should be able to instantiate as a noop profiler', () {
-    expect(() => new Profiler(), returnsNormally);
-  });
-
   group('Default Impl', () {
     Profiler perf;
 
