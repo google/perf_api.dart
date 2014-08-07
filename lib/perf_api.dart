@@ -9,12 +9,6 @@ class Profiler {
   final Counters counters = new Counters();
 
   /**
-   * Const constructor allows instances of this class to be used as a no-op
-   * implementation.
-   */
-  const Profiler();
-
-  /**
    * Starts a new timer for a given action [name]. A timer id will be
    * returned which can be used in [stopTimer] to stop the timer.
    *
@@ -72,8 +66,6 @@ class Profiler {
 class Counters {
 
   final Map<String, int> _counters = <String, int>{};
-
-  const Counters();
 
   /**
    * Increments the counter under [counterName] by [delta]. Default [delta]
