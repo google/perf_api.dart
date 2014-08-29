@@ -9,11 +9,11 @@ import 'perf_api.dart';
  */
 class ConsoleProfiler extends Profiler {
   int _timerIds = 0;
-  Map<int, String> _timers = new Map<int, String>();
+  Map<int, String> _timers = new HashMap<int, String>();
   Map<int, String> _timerNames = new LinkedHashMap<int, String>();
   final dom.Window window;
 
-  ConsoleProfiler() :this.window = dom.window;
+  ConsoleProfiler() : window = dom.window;
 
   ConsoleProfiler.forWindow(this.window);
 
