@@ -3,14 +3,15 @@ library perf_api.console_impl;
 import 'dart:html' as dom;
 import 'dart:collection';
 import 'perf_api.dart';
+import 'package:quiver/collection.dart';
 
 /**
  * Simple window.console based implementation.
  */
 class ConsoleProfiler extends Profiler {
-  int _timerIds = 0;
-  Map<int, String> _timers = new Map<int, String>();
-  Map<int, String> _timerNames = new LinkedHashMap<int, String>();
+  int _nextId = 0;
+  Map<int, String> _timers = new HashMap<int, String>();
+  Multimap<String, int> _timerIds = new ListMultimap<String, int>();
   final dom.Window window;
 
   ConsoleProfiler() :this.window = dom.window;
@@ -18,9 +19,9 @@ class ConsoleProfiler extends Profiler {
   ConsoleProfiler.forWindow(this.window);
 
   dynamic startTimer(String name, [dynamic extraData]) {
-    var timerId = _timerIds++;
+    var timerId = _nextId++;
     _timers[timerId] = _timerName(name, extraData);
-    _timerNames[timerId] = name;
+    _timerIds.add(name, timerId);
     window.console.time(_timerStr(timerId, _timers[timerId]));
     return timerId;
   }
@@ -34,24 +35,25 @@ class ConsoleProfiler extends Profiler {
   String _timerStr(id, name) => '${name} ($id)';
 
   void stopTimer(dynamic idOrName) {
-    int timerId;
+    List<int> timerIds;
+    String timerName;
     if (idOrName is int) {
-      timerId = idOrName;
-    } else {
-      // TODO: change this to use a multimap.
-      for (var id in _timerNames.keys) {
-        if (_timerNames[id] == idOrName) {
-          timerId = id;
-          break;
-        }
+      if (idOrName != null) {
+        timerIds = [idOrName];
+        timerName = _timers[idOrName];
       }
+    } else {
+      timerName = idOrName;
+      timerIds = _timerIds[idOrName];
     }
-    if (timerId == null) {
+    if (timerName == null || timerIds == null || timerIds.isEmpty) {
       throw new ProfilerError('Unable for find timer for $idOrName');
     }
-    window.console.timeEnd(_timerStr(timerId, _timers[timerId]));
-    _timerNames.remove(timerId);
-    _timers.remove(timerId);
+    timerIds.toList().forEach((int timerId) {
+      window.console.timeEnd(_timerStr(timerId, _timers[timerId]));
+      _timers.remove(timerId);
+      _timerIds.remove(timerName, timerId);
+    });
   }
 
   void markTime(String name, [dynamic extraData]) {
