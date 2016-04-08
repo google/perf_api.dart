@@ -2,7 +2,7 @@ library perf_api.noop_test;
 
 import 'dart:async';
 
-import 'package:unittest/unittest.dart';
+import 'package:test/test.dart';
 import 'package:perf_api/perf_api.dart';
 
 main() {
