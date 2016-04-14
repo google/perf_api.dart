@@ -105,7 +105,7 @@ class ProfilerError extends Error {
 }
 
 class _UnmodifiableMap<K, V> implements Map<K, V> {
-  final Map _map;
+  final Map<K, V> _map;
 
   const _UnmodifiableMap(this._map);
 
