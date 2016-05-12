@@ -1,4 +1,4 @@
-library perf_api.noop_test;
+library perf_api.test.profiler;
 
 import 'dart:async';
 

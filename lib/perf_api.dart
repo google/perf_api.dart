@@ -2,6 +2,8 @@ library perf_api;
 
 import 'dart:async';
 
+part 'tracing.dart';
+
 /**
  * A simple profiler api.
  */
